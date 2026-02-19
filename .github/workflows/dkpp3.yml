@@ -3,15 +3,15 @@ name: DKPP3 Auto Runner
 on:
   schedule:
     # MASUK (WIB 06:15-08:15) == UTC 23:15-01:15
-    - cron: "21-51/10 23 * * *"   # 23:21,23:31,23:41,23:51
-    - cron: "6-56/10 0 * * *"     # 00:06..00:56
-    - cron: "6-16/10 1 * * *"     # 01:06,01:16
+    - cron: "21-51/10 23 * * *"
+    - cron: "6-56/10 0 * * *"
+    - cron: "6-16/10 1 * * *"
 
     # PULANG (WIB 15:00-18:00) == UTC 08:00-11:00
-    - cron: "6-56/10 8 * * *"     # 08:06..08:56
-    - cron: "6-56/10 9 * * *"     # 09:06..09:56
-    - cron: "6-56/10 10 * * *"    # 10:06..10:56
-    - cron: "6 11 * * *"          # 11:06 (18:06 WIB) — masih aman
+    - cron: "6-56/10 8 * * *"
+    - cron: "6-56/10 9 * * *"
+    - cron: "6-56/10 10 * * *"
+    - cron: "6 11 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -22,6 +22,8 @@ jobs:
   run:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      RUN_KEY: dkpp3   # ✅ pindah ke sini
 
     steps:
       - name: Checkout
@@ -38,9 +40,9 @@ jobs:
           path: |
             .cache
             .state
-          key: dkpp-auto-${{ github.workflow }}-${{ github.ref_name }}
+          key: dkpp-auto-${{ env.RUN_KEY }}-${{ github.ref_name }}
           restore-keys: |
-            dkpp-auto-${{ github.workflow }}-${{ github.ref_name }}-
+            dkpp-auto-${{ env.RUN_KEY }}-${{ github.ref_name }}-
 
       - name: Install dependencies
         run: |
@@ -49,7 +51,6 @@ jobs:
 
       - name: Run
         env:
-          RUN_KEY: "dkpp3"
           EKIN_USER: ${{ secrets.DKPP3_USER }}
           EKIN_PASS: ${{ secrets.DKPP3_PASS }}
 
@@ -65,6 +66,5 @@ jobs:
 
           MASUK_TARGET_COUNT: "1"
           PULANG_TARGET_COUNT: "1"
-
         run: |
           python runner.py
