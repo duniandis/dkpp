@@ -54,9 +54,9 @@ jobs:
           DEVICE_NAME: "vivo Y35"
 
           WIN_MASUK_START: "07:15:00"
-          WIN_MASUK_END:   "08:15:00"
+          WIN_MASUK_END: "08:15:00"
           WIN_PULANG_START: "15:00:00"
-          WIN_PULANG_END:  "17:00:00"
+          WIN_PULANG_END: "17:00:00"
 
           NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
 
