@@ -1,0 +1,71 @@
+name: DKPP1 Auto Runner
+
+on:
+  schedule:
+    # Polling schedule (UTC). Script will decide based on Asia/Jakarta windows.
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: dkpp-global-queue
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Restore cache (state, cookie, device, coord)
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache
+            .state
+          key: dkpp-auto-${{ github.workflow }}-${{ github.ref_name }}
+          restore-keys: |
+            dkpp-auto-${{ github.workflow }}-${{ github.ref_name }}-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run
+        env:
+          # Credentials
+          EKIN_USER: ${{ secrets.DKPP1_USER }}
+          EKIN_PASS: ${{ secrets.DKPP1_PASS }}
+
+          # Windows (Asia/Jakarta)
+          WIN_MASUK_START: "06:15:00"
+          WIN_MASUK_END:   "06:30:00"
+          WIN_PULANG_START:"16:00:00"
+          WIN_PULANG_END:  "17:00:00"
+
+          # NTFY
+          NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}  # e.g. https://ntfy.sh/yourtopic
+
+          # Behavior
+          MASUK_TARGET_COUNT: "1"
+          PULANG_TARGET_COUNT:"1"
+
+        run: |
+          python runner.py
+
+      - name: Notify failure (ntfy)
+        if: failure()
+        env:
+          NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
+        run: |
+          if [ -n "$NTFY_TOPIC_URL" ]; then
+            curl -s -X POST               -H "Title: DKPP_AUTO FAILED"               -H "Priority: high"               -d "Workflow gagal. Buka GitHub Actions logs untuk detail."               "$NTFY_TOPIC_URL" >/dev/null || true
+          fi
