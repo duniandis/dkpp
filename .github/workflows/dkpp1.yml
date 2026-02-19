@@ -3,15 +3,15 @@ name: DKPP1 Auto Runner
 on:
   schedule:
     # MASUK (WIB 06:15-08:15) == UTC 23:15-01:15
-    - cron: "15-55/10 23 * * *"  # 23:15,23:25,23:35,23:45,23:55 UTC
-    - cron: "*/10 0 * * *"       # 00:00..00:50 UTC
-    - cron: "0-15/10 1 * * *"    # 01:00,01:10 UTC
+    - cron: "15-55/10 23 * * *"
+    - cron: "*/10 0 * * *"
+    - cron: "0-15/10 1 * * *"
 
     # PULANG (WIB 15:00-18:00) == UTC 08:00-11:00
-    - cron: "*/10 8 * * *"       # 08:00..08:50 UTC
-    - cron: "*/10 9 * * *"       # 09:00..09:50 UTC
-    - cron: "*/10 10 * * *"      # 10:00..10:50 UTC
-    - cron: "*/10 11 * * *"      # 11:00..11:50 UTC (ini mencakup 18:00 WIB = 11:00 UTC juga)
+    - cron: "*/10 8 * * *"
+    - cron: "*/10 9 * * *"
+    - cron: "*/10 10 * * *"
+    - cron: "0 11 * * *"  # tepat 18:00 WIB saja
   workflow_dispatch:
 
 concurrency:
