@@ -6,7 +6,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# Endpoints
+# ------------------ Endpoints ------------------
 LOGIN_URL   = "https://ekinerja.baritoutarakab.go.id/api/presentapp/login"
 AUTH_URL    = "https://ekinerja.baritoutarakab.go.id/api/presentapp/auth"
 SNDLOC_URL  = "https://ekinerja.baritoutarakab.go.id/api/presentapp/sndloc"
@@ -24,7 +24,8 @@ COOKIE_FILE = CACHE_DIR / "cookie_ekin.json"
 COORD_FILE  = CACHE_DIR / "coord.json"
 LOCK_FILE   = STATE_DIR / "lock.json"
 
-# ------------------ waktu ------------------
+
+# ------------------ waktu (WIB) ------------------
 def tz_now_wib() -> datetime:
     return datetime.utcnow() + timedelta(hours=7)
 
@@ -36,7 +37,8 @@ def in_window(now_local: datetime, start: str, end: str) -> bool:
     sec = now_local.hour * 3600 + now_local.minute * 60 + now_local.second
     return parse_time_to_sec(start) <= sec <= parse_time_to_sec(end)
 
-# ------------------ ntfy ------------------
+
+# ------------------ ntfy (hanya dipakai saat sukses pertama) ------------------
 def ntfy(title: str, message: str, priority: str = "default"):
     url = os.getenv("NTFY_TOPIC_URL", "").strip()
     if not url:
@@ -51,6 +53,7 @@ def ntfy(title: str, message: str, priority: str = "default"):
     except Exception:
         pass
 
+
 # ------------------ json io ------------------
 def load_json(path: Path, default=None):
     if not path.exists():
@@ -64,7 +67,8 @@ def save_json(path: Path, obj):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
 
-# ------------------ lock ------------------
+
+# ------------------ lock (pengaman tambahan) ------------------
 def acquire_lock(max_age_seconds: int = 20*60) -> bool:
     now = int(time.time())
     cur = load_json(LOCK_FILE, {})
@@ -81,7 +85,8 @@ def release_lock():
     except Exception:
         pass
 
-# ------------------ identity ------------------
+
+# ------------------ identity dari ENV ------------------
 def get_device_identity_from_env():
     device_id = os.getenv("DEVICE_ID_16", "").strip()
     device_name = os.getenv("DEVICE_NAME", "").strip()
@@ -90,6 +95,7 @@ def get_device_identity_from_env():
     if not device_name:
         raise RuntimeError("ENV DEVICE_NAME wajib diisi (tanam di .yml).")
     return device_id, device_name
+
 
 # ------------------ cookie persisten ------------------
 def load_cookie_value() -> str | None:
@@ -111,6 +117,7 @@ def extract_ekin_cookie_from_session(session: requests.Session) -> str | None:
         if c.name == "ekinbarut":
             return f"{c.name}={c.value}"
     return None
+
 
 # ------------------ session retry ------------------
 def make_session() -> requests.Session:
@@ -138,7 +145,8 @@ def base_headers():
 def post_form(session: requests.Session, url: str, data: dict):
     return session.post(url, data=data, headers=base_headers(), timeout=30)
 
-# ------------------ rules ket ------------------
+
+# ------------------ rules ket + marked ------------------
 def normalize_ket(ket: str) -> str:
     t = (ket or "").strip()
     if not t:
@@ -157,6 +165,7 @@ def is_marked(value: str) -> bool:
     v = (value or "").strip()
     return bool(v) and v != "-"
 
+
 # ------------------ state per hari ------------------
 def state_path_for(day: date, key: str) -> Path:
     return STATE_DIR / f"{day.isoformat()}_{key}.json"
@@ -174,22 +183,6 @@ def done_count(day: date, key: str) -> int:
 def already_done(day: date, key: str, target_count: int) -> bool:
     return done_count(day, key) >= target_count
 
-def mark_done(day: date, key: str, ok: bool, msg: str, infoday_obj: dict | None):
-    st = load_state(day, key)
-    st["done_count"] = int(st.get("done_count", 0) or 0) + 1
-    st["last_run_at"] = tz_now_wib().isoformat(sep=" ", timespec="seconds")
-    st["last_result_ok"] = bool(ok)
-    st["last_message"] = msg
-    st["last_infoday"] = infoday_obj
-    # notif hanya sekali saat sukses pertama
-    st["notified_success"] = True
-    st["notified_at"] = tz_now_wib().isoformat(sep=" ", timespec="seconds")
-    save_state(day, key, st)
-
-def success_notified(day: date, key: str) -> bool:
-    st = load_state(day, key)
-    return bool(st.get("notified_success", False))
-
 def update_last(day: date, key: str, ok: bool, msg: str, infoday_obj: dict | None):
     st = load_state(day, key)
     st["last_run_at"] = tz_now_wib().isoformat(sep=" ", timespec="seconds")
@@ -197,6 +190,26 @@ def update_last(day: date, key: str, ok: bool, msg: str, infoday_obj: dict | Non
     st["last_message"] = msg
     st["last_infoday"] = infoday_obj
     save_state(day, key, st)
+
+def mark_done(day: date, key: str, ok: bool, msg: str, infoday_obj: dict | None):
+    st = load_state(day, key)
+    st["done_count"] = int(st.get("done_count", 0) or 0) + 1
+    st["done_at"] = tz_now_wib().isoformat(sep=" ", timespec="seconds")
+    st["last_result_ok"] = bool(ok)
+    st["last_message"] = msg
+    st["last_infoday"] = infoday_obj
+    save_state(day, key, st)
+
+def success_notified(day: date, key: str) -> bool:
+    st = load_state(day, key)
+    return bool(st.get("notified_success", False))
+
+def mark_success_notified(day: date, key: str):
+    st = load_state(day, key)
+    st["notified_success"] = True
+    st["notified_at"] = tz_now_wib().isoformat(sep=" ", timespec="seconds")
+    save_state(day, key, st)
+
 
 # ------------------ koordinat ------------------
 def load_coords_from_csv(path: str = "koordinat.csv"):
@@ -222,7 +235,7 @@ def load_coords_from_csv(path: str = "koordinat.csv"):
                 continue
 
     if not coords:
-        raise RuntimeError("Isi koordinat.csv kosong atau format tidak sesuai (butuh kolom lat,lang).")
+        raise RuntimeError("Isi koordinat.csv kosong / format salah (butuh kolom lat,lang).")
     return coords
 
 def get_or_pick_coord():
@@ -236,6 +249,7 @@ def get_or_pick_coord():
     lat, lng = random.choice(coords)
     save_json(COORD_FILE, {"lat": lat, "lng": lng})
     return lat, lng
+
 
 # ------------------ API wrappers ------------------
 def auth_initial(session: requests.Session):
@@ -308,18 +322,17 @@ def sndloc(session: requests.Session, token: str, akun: str, lat: float, lng: fl
         pass
     return ok_send, msg_send
 
+
 # ------------------ parse window dari INFODAY ------------------
 _WINDOW_RE = re.compile(r"(\d{2}:\d{2}:\d{2}).*?(\d{2}:\d{2}:\d{2})")
 
 def parse_infoday_window(jstr: str) -> tuple[str, str] | None:
-    """
-    Contoh: '07:15:00 sampai 08:15:00' -> ('07:15:00','08:15:00')
-    """
     s = (jstr or "").strip()
     m = _WINDOW_RE.search(s)
     if not m:
         return None
     return m.group(1), m.group(2)
+
 
 # ------------------ core run_once ------------------
 def run_once(type_name: str):
@@ -342,7 +355,7 @@ def run_once(type_name: str):
     ok, msg, token, akun = login(session, user, pw, device_id, device_name)
     save_cookie_value(extract_ekin_cookie_from_session(session))
     if not ok or not token or not akun:
-        return False, msg, None, None  # ok, msg, infoday_obj, before_parsed
+        return False, msg, None, None
 
     # AUTH
     ok2, msg2 = auth(session, token, akun)
@@ -381,12 +394,13 @@ def run_once(type_name: str):
 
     return ok_send, msg_send, info_after_obj, before
 
+
 # ------------------ main ------------------
 def main():
     now = tz_now_wib()
     today = now.date()
 
-    # fallback window dari env (untuk “batas lebar”)
+    # fallback window dari ENV (batas lebar)
     env_masuk_start  = os.environ.get("WIN_MASUK_START", "06:15:00").strip()
     env_masuk_end    = os.environ.get("WIN_MASUK_END",   "08:15:00").strip()
     env_pulang_start = os.environ.get("WIN_PULANG_START","15:00:00").strip()
@@ -395,7 +409,7 @@ def main():
     masuk_target  = int(os.getenv("MASUK_TARGET_COUNT", "1"))
     pulang_target = int(os.getenv("PULANG_TARGET_COUNT", "1"))
 
-    # --- Tentukan tipe apa yang mungkin jalan hari ini (pakai window ENV dulu untuk hemat) ---
+    # hemat: cek window lebar dulu (biar tidak hit INFODAY kalau di luar jam)
     possible = []
     if in_window(now, env_masuk_start, env_masuk_end) and not already_done(today, "MASUK", masuk_target):
         possible.append("MASUK")
@@ -414,54 +428,53 @@ def main():
         time.sleep(random.randint(2, 10))  # jitter kecil
 
         for tname in possible:
-            # jalankan sekali, tapi kita akan validasi window FINAL dari INFODAY (jmasuk/jpulang)
             ok, msg, infoday_obj, before_parsed = run_once(tname)
 
-            # kalau sebelum punya jmasuk/jpulang valid, pakai itu sebagai window final
+            # window final dari INFODAY (kalau bisa), fallback ke ENV
             final_start, final_end = None, None
             if isinstance(before_parsed, dict):
-                if tname == "MASUK":
-                    w = parse_infoday_window(before_parsed.get("jmasuk", ""))
-                else:
-                    w = parse_infoday_window(before_parsed.get("jpulang", ""))
+                w = parse_infoday_window(before_parsed.get("jmasuk" if tname == "MASUK" else "jpulang", ""))
                 if w:
                     final_start, final_end = w
 
-            # bila INFODAY tidak bisa diparse, fallback ke ENV
             if not final_start or not final_end:
                 final_start, final_end = (env_masuk_start, env_masuk_end) if tname == "MASUK" else (env_pulang_start, env_pulang_end)
 
-            # kalau ternyata sekarang tidak ada di window FINAL, jangan lakukan apa-apa (anti “keburu done”)
+            # jika ternyata di luar window final, jangan DONE / jangan NTFY
             if not in_window(now, final_start, final_end):
-                print(f"[{now}] {tname}: di luar window FINAL ({final_start}-{final_end}). Skip.")
                 update_last(today, tname, ok, f"SKIP luar window FINAL {final_start}-{final_end} | {msg}", infoday_obj)
+                print(f"[{now}] {tname}: di luar window FINAL ({final_start}-{final_end}). Skip.")
                 continue
 
-            # Simpan last (biar kebaca status terakhir)
+            # simpan status terakhir
             update_last(today, tname, ok, msg, infoday_obj)
 
-            # DONE + NTFY hanya jika sndloc sukses benar-benar sekali pertama
-            if ok and (msg or "").strip().lower().startswith("berhasil:") and not already_done(today, tname, 1):
+            # sukses sndloc?
+            is_success = ok and (msg or "").strip().lower().startswith("berhasil:")
+
+            # DONE hanya kalau sukses dan belum done hari ini
+            if is_success and not already_done(today, tname, 1):
                 mark_done(today, tname, ok, msg, infoday_obj)
 
-                # notif sukses pertama saja per hari per tipe
+                # NTFY hanya sekali saat sukses pertama
                 if not success_notified(today, tname):
                     try:
                         payload = json.dumps(infoday_obj, ensure_ascii=False)
                     except Exception:
                         payload = str(infoday_obj)
 
-                    title = f"DKPP_AUTO {tname} OK"
                     ntfy(
-                        title,
+                        f"DKPP_AUTO {tname} OK",
                         f"{tname}: {msg}\nWaktu: {tz_now_wib().isoformat(sep=' ', timespec='seconds')}\n\nINFODAY_AFTER:\n{payload}",
                         priority="default",
                     )
+                    mark_success_notified(today, tname)
 
             print(f"{tname}: {ok} - {msg}")
 
     finally:
         release_lock()
+
 
 if __name__ == "__main__":
     main()
