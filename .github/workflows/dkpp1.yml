@@ -53,8 +53,8 @@ jobs:
           DEVICE_ID_16: "1dadb39e300a8b56"
           DEVICE_NAME: "vivo Y35"
 
-          WIN_MASUK_START: "11:12:00"
-          WIN_MASUK_END: "08:15:00"
+          WIN_MASUK_START: "11:00:00"
+          WIN_MASUK_END: "12:00:00"
           WIN_PULANG_START: "15:00:00"
           WIN_PULANG_END: "17:00:00"
 
