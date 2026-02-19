@@ -14,15 +14,16 @@ INFODAY_URL = "https://ekinerja.baritoutarakab.go.id/api/presentapp/infoday"
 ACCEPT_HEADER = "application/json, text/plain, */*"
 USER_AGENT = "okhttp/4.12.0"
 
-CACHE_DIR = Path(".cache")
-STATE_DIR = Path(".state")
-CACHE_DIR.mkdir(exist_ok=True)
-STATE_DIR.mkdir(exist_ok=True)
+RUN_KEY = os.getenv("RUN_KEY", "default").strip() or "default"
+
+CACHE_DIR = Path(".cache") / RUN_KEY
+STATE_DIR = Path(".state") / RUN_KEY
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 COOKIE_FILE = CACHE_DIR / "cookie_ekin.json"
 COORD_FILE  = CACHE_DIR / "coord.json"
 LOCK_FILE   = STATE_DIR / "lock.json"
-
 
 # ---------------- waktu ----------------
 def tz_now_wib() -> datetime:
