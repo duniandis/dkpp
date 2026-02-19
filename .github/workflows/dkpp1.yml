@@ -2,8 +2,14 @@ name: DKPP1 Auto Runner
 
 on:
   schedule:
-    # Polling schedule (UTC). Script will decide based on Asia/Jakarta windows.
-    - cron: "*/55 * * * *"
+    # MASUK (WIB 07:15-08:15) == UTC 00:15-01:15
+    - cron: "15-59 0 * * *"
+    - cron: "0-15 1 * * *"
+
+    # PULANG (WIB 15:00-17:00) == UTC 08:00-10:00
+    - cron: "* 8 * * *"
+    - cron: "* 9 * * *"
+    - cron: "0 10 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -24,7 +30,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Restore cache (state, cookie, device, coord)
+      - name: Restore cache (state, cookie)
         uses: actions/cache@v4
         with:
           path: |
@@ -41,31 +47,21 @@ jobs:
 
       - name: Run
         env:
-          # Credentials
           EKIN_USER: ${{ secrets.DKPP1_USER }}
           EKIN_PASS: ${{ secrets.DKPP1_PASS }}
 
-          # Windows (Asia/Jakarta)
-          WIN_MASUK_START: "06:15:00"
-          WIN_MASUK_END:   "06:30:00"
-          WIN_PULANG_START:"16:00:00"
+          DEVICE_ID_16: "0123456789abcdef"
+          DEVICE_NAME: "POCO F7"
+
+          WIN_MASUK_START: "07:15:00"
+          WIN_MASUK_END:   "08:15:00"
+          WIN_PULANG_START:"15:00:00"
           WIN_PULANG_END:  "17:00:00"
 
-          # NTFY
-          NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}  # e.g. https://ntfy.sh/yourtopic
+          NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
 
-          # Behavior
           MASUK_TARGET_COUNT: "1"
           PULANG_TARGET_COUNT:"1"
 
         run: |
           python runner.py
-
-      - name: Notify failure (ntfy)
-        if: failure()
-        env:
-          NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
-        run: |
-          if [ -n "$NTFY_TOPIC_URL" ]; then
-            curl -s -X POST               -H "Title: DKPP_AUTO FAILED"               -H "Priority: high"               -d "Workflow gagal. Buka GitHub Actions logs untuk detail."               "$NTFY_TOPIC_URL" >/dev/null || true
-          fi
