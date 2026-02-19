@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: dkpp-global-queue
+  group: dkpp-queue-dkpp1
   cancel-in-progress: false
 
 jobs:
@@ -49,6 +49,7 @@ jobs:
 
       - name: Run
         env:
+          RUN_KEY: "dkpp1"
           EKIN_USER: ${{ secrets.DKPP1_USER }}
           EKIN_PASS: ${{ secrets.DKPP1_PASS }}
 
