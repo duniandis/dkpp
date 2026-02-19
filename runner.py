@@ -1,6 +1,7 @@
-import os, json, time, random, csv
+import os, json, time, random, csv, re
 from pathlib import Path
 from datetime import datetime, date, timedelta
+
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -168,12 +169,13 @@ def post_form(session: requests.Session, url: str, data: dict):
 
 
 # =========================
-# KET RULES
+# KET + HOLIDAY RULES
 # =========================
 def normalize_ket(ket: str) -> str:
     t = (ket or "").strip()
     if not t:
         return ""
+    # "-" / "---" dianggap kosong
     if all(ch == "-" for ch in t):
         return ""
     return t
@@ -187,6 +189,35 @@ def should_skip_by_ket(ket: str) -> tuple[bool, str]:
 def is_marked(value: str) -> bool:
     v = (value or "").strip()
     return bool(v) and v != "-"
+
+def has_any_hms_time(text: str) -> bool:
+    # cari jam HH:MM:SS di string apapun
+    if not text:
+        return False
+    return re.search(r"\b\d{2}:\d{2}:\d{2}\b", str(text)) is not None
+
+def is_holiday_or_unplanned(jmasuk: str, jpulang: str) -> tuple[bool, str]:
+    """
+    Hari libur/tidak terjadwal biasanya jmasuk/jpulang berisi teks
+    mis: "Hari Libur", "Pegawai belum terjadual", dll.
+    RULE UTAMA: kalau gabungan jmasuk+jpulang TIDAK mengandung jam HH:MM:SS sama sekali -> anggap LIBUR/UNPLANNED.
+    """
+    jm = str(jmasuk or "").strip()
+    jp = str(jpulang or "").strip()
+    combo = (jm + " | " + jp).strip(" |")
+
+    if not has_any_hms_time(combo):
+        # tidak ada jam -> jangan sndloc
+        reason = combo if combo else "Jadwal tidak berisi jam (kemungkinan libur / belum terjadwal)"
+        return True, reason
+
+    # keyword tambahan (optional, tapi aman)
+    low = combo.lower()
+    keywords = ["hari libur", "libur", "tidak terjadwal", "belum terjadwal", "belum terjadual", "belum dijadwal", "belum dijadwalkan"]
+    if any(k in low for k in keywords):
+        return True, combo
+
+    return False, ""
 
 
 # =========================
@@ -348,6 +379,7 @@ def sndloc(session: requests.Session, token: str, akun: str, lat: float, lng: fl
 def format_infoday_brief(raw_obj: dict | None) -> str:
     if not isinstance(raw_obj, dict):
         return "-"
+
     data = raw_obj.get("data") or {}
     today = raw_obj.get("today", "-")
 
@@ -357,6 +389,7 @@ def format_infoday_brief(raw_obj: dict | None) -> str:
     jpulang = data.get("jpulang", "-")
     masuk = data.get("masuk", "-")
     pulang = data.get("pulang", "-")
+
     ket = (data.get("ket") or "").strip()
     if ket and all(ch == "-" for ch in ket):
         ket = ""
@@ -412,12 +445,17 @@ def run_once(type_name: str):
 
     before = extract_infodata(info_before_obj)
 
-    # ket filter (jika ada keterangan panjang -> jangan sndloc)
+    # 0) cek libur / belum terjadwal: kalau jmasuk/jpulang tidak ada jam HH:MM:SS -> jangan sndloc
+    is_off, reason = is_holiday_or_unplanned(before["jmasuk"], before["jpulang"])
+    if is_off:
+        return True, f"SKIP: {reason}", before["raw"]
+
+    # 1) ket filter: kalau ket panjang -> jangan sndloc
     skip_ket, reason = should_skip_by_ket(before["ket"])
     if skip_ket:
         return True, reason, before["raw"]
 
-    # sudah masuk/pulang? (skip sndloc)
+    # 2) sudah masuk/pulang? (skip sndloc)
     if type_name == "MASUK" and is_marked(before["masuk"]):
         return True, f"SKIP: sudah MASUK ({before['masuk']})", before["raw"]
     if type_name == "PULANG" and is_marked(before["pulang"]):
@@ -440,7 +478,7 @@ def main():
     now = tz_now_wib()
     today = now.date()
 
-    # window dari workflow yml
+    # window dari workflow yml (untuk pembatasan runner)
     masuk_start  = os.environ["WIN_MASUK_START"].strip()
     masuk_end    = os.environ["WIN_MASUK_END"].strip()
     pulang_start = os.environ["WIN_PULANG_START"].strip()
@@ -449,7 +487,6 @@ def main():
     masuk_target  = int(os.getenv("MASUK_TARGET_COUNT", "1"))
     pulang_target = int(os.getenv("PULANG_TARGET_COUNT", "1"))
 
-    # hanya jalan kalau ada task (di dalam window & belum done)
     tasks = []
     if in_window(now, masuk_start, masuk_end) and not already_done(today, "MASUK", masuk_target):
         tasks.append("MASUK")
@@ -481,7 +518,7 @@ def main():
             else:
                 save_last_only(today, tname, ok, msg, infoday_obj)
 
-            # NTFY: kirim semua kondisi selama di dalam window
+            # NTFY: kirim semua kondisi selama di dalam window (tasks ada)
             title = f"DKPP_AUTO {RUN_KEY} {tname} {'OK' if ok else 'INFO'}"
             prio = "default" if ok else "high"
 
