@@ -50,18 +50,18 @@ jobs:
           EKIN_USER: ${{ secrets.DKPP1_USER }}
           EKIN_PASS: ${{ secrets.DKPP1_PASS }}
 
-          DEVICE_ID_16: "0123456789abcdef"
-          DEVICE_NAME: "POCO F7"
+          DEVICE_ID_16: "1dadb39e300a8b56"
+          DEVICE_NAME: "vivo Y35"
 
           WIN_MASUK_START: "07:15:00"
           WIN_MASUK_END:   "08:15:00"
-          WIN_PULANG_START:"15:00:00"
+          WIN_PULANG_START: "15:00:00"
           WIN_PULANG_END:  "17:00:00"
 
           NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
 
           MASUK_TARGET_COUNT: "1"
-          PULANG_TARGET_COUNT:"1"
+          PULANG_TARGET_COUNT: "1"
 
         run: |
           python runner.py
