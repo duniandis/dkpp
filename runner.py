@@ -1,14 +1,4 @@
-# runner.py (FINAL)
-# - Window dari .yml (WIN_MASUK_*, WIN_PULANG_*)
-# - Cron boleh berulang, tetapi:
-#   * DONE hanya jika SNDLOC benar-benar sukses ("Berhasil:")
-#   * NTFY hanya 1x per MASUK/PULANG per hari (di dalam window saja)
-# - Skip SNDLOC jika:
-#   * ket panjang > 2 (mis. "Dinas ...")
-#   * sudah masuk/pulang (server tidak "-")
-# - Tahan banting: retry HTTP, lock, cache cookie+state, jitter kecil
-
-import os, json, time, random, csv
+import os, json, time, random, csv, re
 from pathlib import Path
 from datetime import datetime, date, timedelta
 
@@ -34,22 +24,19 @@ COOKIE_FILE = CACHE_DIR / "cookie_ekin.json"
 COORD_FILE  = CACHE_DIR / "coord.json"
 LOCK_FILE   = STATE_DIR / "lock.json"
 
-
-# -------------------- Time utils --------------------
+# ------------------ waktu ------------------
 def tz_now_wib() -> datetime:
-    # WIB / Asia/Jakarta (UTC+7)
     return datetime.utcnow() + timedelta(hours=7)
 
 def parse_time_to_sec(t: str) -> int:
     h, m, s = [int(x) for x in t.split(":")]
-    return h*3600 + m*60 + s
+    return h * 3600 + m * 60 + s
 
 def in_window(now_local: datetime, start: str, end: str) -> bool:
-    sec = now_local.hour*3600 + now_local.minute*60 + now_local.second
+    sec = now_local.hour * 3600 + now_local.minute * 60 + now_local.second
     return parse_time_to_sec(start) <= sec <= parse_time_to_sec(end)
 
-
-# -------------------- NTFY --------------------
+# ------------------ ntfy ------------------
 def ntfy(title: str, message: str, priority: str = "default"):
     url = os.getenv("NTFY_TOPIC_URL", "").strip()
     if not url:
@@ -64,8 +51,7 @@ def ntfy(title: str, message: str, priority: str = "default"):
     except Exception:
         pass
 
-
-# -------------------- JSON IO --------------------
+# ------------------ json io ------------------
 def load_json(path: Path, default=None):
     if not path.exists():
         return default
@@ -78,8 +64,7 @@ def save_json(path: Path, obj):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
 
-
-# -------------------- Lock (extra safety) --------------------
+# ------------------ lock ------------------
 def acquire_lock(max_age_seconds: int = 20*60) -> bool:
     now = int(time.time())
     cur = load_json(LOCK_FILE, {})
@@ -96,21 +81,17 @@ def release_lock():
     except Exception:
         pass
 
-
-# -------------------- Identity --------------------
+# ------------------ identity ------------------
 def get_device_identity_from_env():
     device_id = os.getenv("DEVICE_ID_16", "").strip()
     device_name = os.getenv("DEVICE_NAME", "").strip()
-
     if not device_id or len(device_id) != 16:
         raise RuntimeError("ENV DEVICE_ID_16 wajib 16 karakter (tanam di .yml).")
     if not device_name:
         raise RuntimeError("ENV DEVICE_NAME wajib diisi (tanam di .yml).")
-
     return device_id, device_name
 
-
-# -------------------- Cookie persistence --------------------
+# ------------------ cookie persisten ------------------
 def load_cookie_value() -> str | None:
     data = load_json(COOKIE_FILE, {})
     c = (data.get("cookie") or "").strip()
@@ -120,7 +101,6 @@ def save_cookie_value(cookie_value: str | None):
     save_json(COOKIE_FILE, {"cookie": cookie_value or ""})
 
 def set_session_cookie(session: requests.Session, cookie_value: str | None):
-    # cookie_value: "ekinbarut=...."
     if not cookie_value or "=" not in cookie_value:
         return
     name, val = cookie_value.split("=", 1)
@@ -132,8 +112,7 @@ def extract_ekin_cookie_from_session(session: requests.Session) -> str | None:
             return f"{c.name}={c.value}"
     return None
 
-
-# -------------------- Session + retry --------------------
+# ------------------ session retry ------------------
 def make_session() -> requests.Session:
     s = requests.Session()
     retry = Retry(
@@ -149,7 +128,6 @@ def make_session() -> requests.Session:
     return s
 
 def base_headers():
-    # header sederhana mendekati OkHttp
     return {
         "Accept": ACCEPT_HEADER,
         "User-Agent": USER_AGENT,
@@ -160,8 +138,7 @@ def base_headers():
 def post_form(session: requests.Session, url: str, data: dict):
     return session.post(url, data=data, headers=base_headers(), timeout=30)
 
-
-# -------------------- Rules --------------------
+# ------------------ rules ket ------------------
 def normalize_ket(ket: str) -> str:
     t = (ket or "").strip()
     if not t:
@@ -180,11 +157,7 @@ def is_marked(value: str) -> bool:
     v = (value or "").strip()
     return bool(v) and v != "-"
 
-def is_sndloc_success(ok: bool, msg: str) -> bool:
-    return bool(ok) and (msg or "").strip().lower().startswith("berhasil:")
-
-
-# -------------------- State per day --------------------
+# ------------------ state per hari ------------------
 def state_path_for(day: date, key: str) -> Path:
     return STATE_DIR / f"{day.isoformat()}_{key}.json"
 
@@ -194,10 +167,12 @@ def load_state(day: date, key: str) -> dict:
 def save_state(day: date, key: str, st: dict):
     save_json(state_path_for(day, key), st)
 
-def already_done(day: date, key: str, target_count: int) -> bool:
+def done_count(day: date, key: str) -> int:
     st = load_state(day, key)
-    done = int(st.get("done_count", 0) or 0)
-    return done >= target_count
+    return int(st.get("done_count", 0) or 0)
+
+def already_done(day: date, key: str, target_count: int) -> bool:
+    return done_count(day, key) >= target_count
 
 def mark_done(day: date, key: str, ok: bool, msg: str, infoday_obj: dict | None):
     st = load_state(day, key)
@@ -206,9 +181,16 @@ def mark_done(day: date, key: str, ok: bool, msg: str, infoday_obj: dict | None)
     st["last_result_ok"] = bool(ok)
     st["last_message"] = msg
     st["last_infoday"] = infoday_obj
+    # notif hanya sekali saat sukses pertama
+    st["notified_success"] = True
+    st["notified_at"] = tz_now_wib().isoformat(sep=" ", timespec="seconds")
     save_state(day, key, st)
 
-def mark_last_only(day: date, key: str, ok: bool, msg: str, infoday_obj: dict | None):
+def success_notified(day: date, key: str) -> bool:
+    st = load_state(day, key)
+    return bool(st.get("notified_success", False))
+
+def update_last(day: date, key: str, ok: bool, msg: str, infoday_obj: dict | None):
     st = load_state(day, key)
     st["last_run_at"] = tz_now_wib().isoformat(sep=" ", timespec="seconds")
     st["last_result_ok"] = bool(ok)
@@ -216,18 +198,7 @@ def mark_last_only(day: date, key: str, ok: bool, msg: str, infoday_obj: dict | 
     st["last_infoday"] = infoday_obj
     save_state(day, key, st)
 
-def notified_already(day: date, key: str) -> bool:
-    st = load_state(day, key)
-    return bool(st.get("notified", False))
-
-def mark_notified(day: date, key: str):
-    st = load_state(day, key)
-    st["notified"] = True
-    st["notified_at"] = tz_now_wib().isoformat(sep=" ", timespec="seconds")
-    save_state(day, key, st)
-
-
-# -------------------- Coordinates --------------------
+# ------------------ koordinat ------------------
 def load_coords_from_csv(path: str = "koordinat.csv"):
     p = Path(path)
     if not p.exists():
@@ -266,10 +237,9 @@ def get_or_pick_coord():
     save_json(COORD_FILE, {"lat": lat, "lng": lng})
     return lat, lng
 
-
-# -------------------- API wrappers --------------------
+# ------------------ API wrappers ------------------
 def auth_initial(session: requests.Session):
-    return post_form(session, AUTH_URL, {"token": "null", "akun": "null"})
+    post_form(session, AUTH_URL, {"token": "null", "akun": "null"})
 
 def login(session: requests.Session, user: str, pw: str, imei: str, dname: str):
     r = post_form(session, LOGIN_URL, {"user": user, "pass": pw, "imei": imei, "dname": dname})
@@ -280,7 +250,6 @@ def login(session: requests.Session, user: str, pw: str, imei: str, dname: str):
 
     status = int(obj.get("status", 0) or 0)
     msg = str(obj.get("msg", "") or "")
-
     if status == 1:
         return True, "Login berhasil", str(obj.get("token", "") or ""), str(obj.get("akun", "") or "")
     return False, f"Login gagal: {msg}", None, None
@@ -339,8 +308,20 @@ def sndloc(session: requests.Session, token: str, akun: str, lat: float, lng: fl
         pass
     return ok_send, msg_send
 
+# ------------------ parse window dari INFODAY ------------------
+_WINDOW_RE = re.compile(r"(\d{2}:\d{2}:\d{2}).*?(\d{2}:\d{2}:\d{2})")
 
-# -------------------- core --------------------
+def parse_infoday_window(jstr: str) -> tuple[str, str] | None:
+    """
+    Contoh: '07:15:00 sampai 08:15:00' -> ('07:15:00','08:15:00')
+    """
+    s = (jstr or "").strip()
+    m = _WINDOW_RE.search(s)
+    if not m:
+        return None
+    return m.group(1), m.group(2)
+
+# ------------------ core run_once ------------------
 def run_once(type_name: str):
     user = os.getenv("EKIN_USER", "").strip()
     pw   = os.getenv("EKIN_PASS", "").strip()
@@ -351,79 +332,78 @@ def run_once(type_name: str):
     lat, lng = get_or_pick_coord()
 
     session = make_session()
-
-    # restore cookie (fallback)
     set_session_cookie(session, load_cookie_value())
 
-    # initial auth
+    # AUTH initial (refresh cookie)
     auth_initial(session)
     save_cookie_value(extract_ekin_cookie_from_session(session))
 
-    # login
+    # LOGIN
     ok, msg, token, akun = login(session, user, pw, device_id, device_name)
     save_cookie_value(extract_ekin_cookie_from_session(session))
     if not ok or not token or not akun:
-        return False, msg, None
+        return False, msg, None, None  # ok, msg, infoday_obj, before_parsed
 
-    # auth
+    # AUTH
     ok2, msg2 = auth(session, token, akun)
     save_cookie_value(extract_ekin_cookie_from_session(session))
     if not ok2:
-        return False, msg2, None
+        return False, msg2, None, None
 
-    # infoday before
+    # INFODAY sebelum
     ok3, info_before_obj = infoday_raw(session, token, akun)
     save_cookie_value(extract_ekin_cookie_from_session(session))
     if not ok3:
-        return False, f"INFODAY error: {info_before_obj}", info_before_obj
+        return False, f"INFODAY error: {info_before_obj}", info_before_obj, None
 
     before = extract_infodata(info_before_obj)
 
     # ket filter
     skip_ket, reason = should_skip_by_ket(before["ket"])
     if skip_ket:
-        return True, reason, before["raw"]
+        return True, reason, before["raw"], before
 
-    # already marked?
+    # sudah masuk/pulang?
     if type_name == "MASUK" and is_marked(before["masuk"]):
-        return True, f"SKIP: sudah MASUK ({before['masuk']})", before["raw"]
+        return True, f"SKIP: sudah MASUK ({before['masuk']})", before["raw"], before
     if type_name == "PULANG" and is_marked(before["pulang"]):
-        return True, f"SKIP: sudah PULANG ({before['pulang']})", before["raw"]
+        return True, f"SKIP: sudah PULANG ({before['pulang']})", before["raw"], before
 
-    # sndloc
+    # SNDLOC
     ok_send, msg_send = sndloc(session, token, akun, lat, lng, type_name)
     save_cookie_value(extract_ekin_cookie_from_session(session))
 
-    # infoday after
+    # INFODAY setelah
     ok4, info_after_obj = infoday_raw(session, token, akun)
     save_cookie_value(extract_ekin_cookie_from_session(session))
     if not ok4:
-        return ok_send, f"{msg_send} | INFODAY_AFTER error: {info_after_obj}", info_after_obj
+        return ok_send, f"{msg_send} | INFODAY_AFTER error: {info_after_obj}", info_after_obj, before
 
-    return ok_send, msg_send, info_after_obj
+    return ok_send, msg_send, info_after_obj, before
 
-
+# ------------------ main ------------------
 def main():
     now = tz_now_wib()
     today = now.date()
 
-    # window wajib dari workflow yml
-    masuk_start  = os.environ["WIN_MASUK_START"].strip()
-    masuk_end    = os.environ["WIN_MASUK_END"].strip()
-    pulang_start = os.environ["WIN_PULANG_START"].strip()
-    pulang_end   = os.environ["WIN_PULANG_END"].strip()
+    # fallback window dari env (untuk “batas lebar”)
+    env_masuk_start  = os.environ.get("WIN_MASUK_START", "06:15:00").strip()
+    env_masuk_end    = os.environ.get("WIN_MASUK_END",   "08:15:00").strip()
+    env_pulang_start = os.environ.get("WIN_PULANG_START","15:00:00").strip()
+    env_pulang_end   = os.environ.get("WIN_PULANG_END",  "18:00:00").strip()
 
     masuk_target  = int(os.getenv("MASUK_TARGET_COUNT", "1"))
     pulang_target = int(os.getenv("PULANG_TARGET_COUNT", "1"))
 
-    tasks = []
-    if in_window(now, masuk_start, masuk_end) and not already_done(today, "MASUK", masuk_target):
-        tasks.append("MASUK")
-    if in_window(now, pulang_start, pulang_end) and not already_done(today, "PULANG", pulang_target):
-        tasks.append("PULANG")
+    # --- Tentukan tipe apa yang mungkin jalan hari ini (pakai window ENV dulu untuk hemat) ---
+    possible = []
+    if in_window(now, env_masuk_start, env_masuk_end) and not already_done(today, "MASUK", masuk_target):
+        possible.append("MASUK")
+    if in_window(now, env_pulang_start, env_pulang_end) and not already_done(today, "PULANG", pulang_target):
+        possible.append("PULANG")
 
-    if not tasks:
-        print(f"[{now}] Di luar window / sudah DONE hari ini. Exit.")
+    if not possible:
+        print(f"[{now}] Di luar window lebar / sudah DONE hari ini. Exit.")
         return
 
     if not acquire_lock():
@@ -431,40 +411,57 @@ def main():
         return
 
     try:
-        # jitter kecil agar tidak nabrak persis bersamaan
-        time.sleep(random.randint(2, 10))
+        time.sleep(random.randint(2, 10))  # jitter kecil
 
-        for tname in tasks:
-            ok, msg, infoday_obj = run_once(tname)
-            snd_ok = is_sndloc_success(ok, msg)
+        for tname in possible:
+            # jalankan sekali, tapi kita akan validasi window FINAL dari INFODAY (jmasuk/jpulang)
+            ok, msg, infoday_obj, before_parsed = run_once(tname)
 
-            # DONE hanya jika sndloc sukses
-            if snd_ok:
+            # kalau sebelum punya jmasuk/jpulang valid, pakai itu sebagai window final
+            final_start, final_end = None, None
+            if isinstance(before_parsed, dict):
+                if tname == "MASUK":
+                    w = parse_infoday_window(before_parsed.get("jmasuk", ""))
+                else:
+                    w = parse_infoday_window(before_parsed.get("jpulang", ""))
+                if w:
+                    final_start, final_end = w
+
+            # bila INFODAY tidak bisa diparse, fallback ke ENV
+            if not final_start or not final_end:
+                final_start, final_end = (env_masuk_start, env_masuk_end) if tname == "MASUK" else (env_pulang_start, env_pulang_end)
+
+            # kalau ternyata sekarang tidak ada di window FINAL, jangan lakukan apa-apa (anti “keburu done”)
+            if not in_window(now, final_start, final_end):
+                print(f"[{now}] {tname}: di luar window FINAL ({final_start}-{final_end}). Skip.")
+                update_last(today, tname, ok, f"SKIP luar window FINAL {final_start}-{final_end} | {msg}", infoday_obj)
+                continue
+
+            # Simpan last (biar kebaca status terakhir)
+            update_last(today, tname, ok, msg, infoday_obj)
+
+            # DONE + NTFY hanya jika sndloc sukses benar-benar sekali pertama
+            if ok and (msg or "").strip().lower().startswith("berhasil:") and not already_done(today, tname, 1):
                 mark_done(today, tname, ok, msg, infoday_obj)
-            else:
-                mark_last_only(today, tname, ok, msg, infoday_obj)
 
-            # NTFY: hanya sekali per MASUK/PULANG per hari (karena cron berulang)
-            if not notified_already(today, tname):
-                try:
-                    payload = json.dumps(infoday_obj, ensure_ascii=False)
-                except Exception:
-                    payload = str(infoday_obj)
+                # notif sukses pertama saja per hari per tipe
+                if not success_notified(today, tname):
+                    try:
+                        payload = json.dumps(infoday_obj, ensure_ascii=False)
+                    except Exception:
+                        payload = str(infoday_obj)
 
-                title = f"DKPP_AUTO {tname} {'OK' if snd_ok else 'INFO'}"
-                prio = "default" if snd_ok else "high"
-                ntfy(
-                    title,
-                    f"{tname}: {msg}\nWaktu: {tz_now_wib().isoformat(sep=' ', timespec='seconds')}\n\nINFODAY:\n{payload}",
-                    priority=prio
-                )
-                mark_notified(today, tname)
+                    title = f"DKPP_AUTO {tname} OK"
+                    ntfy(
+                        title,
+                        f"{tname}: {msg}\nWaktu: {tz_now_wib().isoformat(sep=' ', timespec='seconds')}\n\nINFODAY_AFTER:\n{payload}",
+                        priority="default",
+                    )
 
-            print(f"{tname}: ok={ok} snd_ok={snd_ok} - {msg}")
+            print(f"{tname}: {ok} - {msg}")
 
     finally:
         release_lock()
-
 
 if __name__ == "__main__":
     main()
