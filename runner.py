@@ -407,8 +407,19 @@ def main():
         for tname in tasks:
             ok, msg, infoday_obj = run_once(tname)
 
-            # tandai done (anti double)
+            # DONE hanya jika sndloc benar-benar sukses ("Berhasil:")
+        if ok and (msg or "").strip().lower().startswith("berhasil:"):
             mark_done(today, tname, ok, msg, infoday_obj)
+        else:
+            # simpan info terakhir tanpa menaikkan done_count (opsional)
+            st = load_state(today, tname)
+            st["last_run_at"] = tz_now_wib().isoformat(sep=" ", timespec="seconds")
+            st["last_result_ok"] = bool(ok)
+            st["last_message"] = msg
+            st["last_infoday"] = infoday_obj
+            save_state(today, tname, st)
+
+
 
             # NTFY: hanya dalam window (tasks ada) + hanya sekali per window/hari
             if not notified_already(today, tname):
