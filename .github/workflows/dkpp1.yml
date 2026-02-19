@@ -3,7 +3,7 @@ name: DKPP1 Auto Runner
 on:
   schedule:
     # Polling schedule (UTC). Script will decide based on Asia/Jakarta windows.
-    - cron: "*/5 * * * *"
+    - cron: "*/55 * * * *"
   workflow_dispatch:
 
 concurrency:
