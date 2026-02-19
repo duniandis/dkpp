@@ -1,0 +1,69 @@
+name: DKPP1 Auto Runner
+
+on:
+  schedule:
+    # MASUK (WIB 06:15-08:15) == UTC 23:15-01:15
+    - cron: "15-55/10 23 * * *"
+    - cron: "*/10 0 * * *"
+    - cron: "0-15/10 1 * * *"
+
+    # PULANG (WIB 15:00-18:00) == UTC 08:00-11:00
+    - cron: "*/10 8 * * *"
+    - cron: "*/10 9 * * *"
+    - cron: "*/10 10 * * *"
+    - cron: "0 11 * * *"  # tepat 18:00 WIB saja
+  workflow_dispatch:
+
+concurrency:
+  group: dkpp-global-queue
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Restore cache (state, cookie)
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache
+            .state
+          key: dkpp-auto-${{ github.workflow }}-${{ github.ref_name }}
+          restore-keys: |
+            dkpp-auto-${{ github.workflow }}-${{ github.ref_name }}-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run
+        env:
+          EKIN_USER: ${{ secrets.DKPP3_USER }}
+          EKIN_PASS: ${{ secrets.DKPP3_PASS }}
+
+          DEVICE_ID_16: "2add5c8613e69d53"
+          DEVICE_NAME: "iPhone XS"
+
+          WIN_MASUK_START: "06:15:00"
+          WIN_MASUK_END: "08:15:00"
+          WIN_PULANG_START: "15:00:00"
+          WIN_PULANG_END: "18:00:00"
+
+          NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
+
+          MASUK_TARGET_COUNT: "1"
+          PULANG_TARGET_COUNT: "1"
+
+        run: |
+          python runner.py
