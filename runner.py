@@ -14,8 +14,8 @@ USER_AGENT = "okhttp/4.12.0"
 
 # Device identity (set manually here to match your app/device).
 # IMPORTANT: keep these stable (do not change) or server will treat it as a new device.
-DEVICE_ID_16 = "0123456789abcdef"   # 16 chars (hex) e.g. a3f9c1d0e4b7aa12
-DEVICE_NAME  = "POCO F7"            # e.g. POCO F7
+DEVICE_ID_16 = os.getenv("DEVICE_ID_16", "")
+DEVICE_NAME = os.getenv("DEVICE_NAME", "")
 
 CACHE_DIR = Path(".cache")
 STATE_DIR = Path(".state")
