@@ -333,11 +333,11 @@ def main():
     now = tz_now_wib()
     today = now.date()
 
-# Window harus dari workflow .yml (wajib ada)
-masuk_start  = os.environ["WIN_MASUK_START"].strip()
-masuk_end    = os.environ["WIN_MASUK_END"].strip()
-pulang_start = os.environ["WIN_PULANG_START"].strip()
-pulang_end   = os.environ["WIN_PULANG_END"].strip()
+    # Window harus dari workflow .yml (wajib ada)
+    masuk_start  = os.environ["WIN_MASUK_START"].strip()
+    masuk_end    = os.environ["WIN_MASUK_END"].strip()
+    pulang_start = os.environ["WIN_PULANG_START"].strip()
+    pulang_end   = os.environ["WIN_PULANG_END"].strip()
 
     masuk_target = int(os.getenv("MASUK_TARGET_COUNT", "1"))
     pulang_target= int(os.getenv("PULANG_TARGET_COUNT","1"))
