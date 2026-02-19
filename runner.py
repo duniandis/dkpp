@@ -1,6 +1,17 @@
+# runner.py (FINAL)
+# - Window dari .yml (WIN_MASUK_*, WIN_PULANG_*)
+# - Cron boleh berulang, tetapi:
+#   * DONE hanya jika SNDLOC benar-benar sukses ("Berhasil:")
+#   * NTFY hanya 1x per MASUK/PULANG per hari (di dalam window saja)
+# - Skip SNDLOC jika:
+#   * ket panjang > 2 (mis. "Dinas ...")
+#   * sudah masuk/pulang (server tidak "-")
+# - Tahan banting: retry HTTP, lock, cache cookie+state, jitter kecil
+
 import os, json, time, random, csv
 from pathlib import Path
 from datetime import datetime, date, timedelta
+
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -23,8 +34,10 @@ COOKIE_FILE = CACHE_DIR / "cookie_ekin.json"
 COORD_FILE  = CACHE_DIR / "coord.json"
 LOCK_FILE   = STATE_DIR / "lock.json"
 
-# ---- util waktu ----
+
+# -------------------- Time utils --------------------
 def tz_now_wib() -> datetime:
+    # WIB / Asia/Jakarta (UTC+7)
     return datetime.utcnow() + timedelta(hours=7)
 
 def parse_time_to_sec(t: str) -> int:
@@ -35,7 +48,8 @@ def in_window(now_local: datetime, start: str, end: str) -> bool:
     sec = now_local.hour*3600 + now_local.minute*60 + now_local.second
     return parse_time_to_sec(start) <= sec <= parse_time_to_sec(end)
 
-# ---- ntfy ----
+
+# -------------------- NTFY --------------------
 def ntfy(title: str, message: str, priority: str = "default"):
     url = os.getenv("NTFY_TOPIC_URL", "").strip()
     if not url:
@@ -50,7 +64,8 @@ def ntfy(title: str, message: str, priority: str = "default"):
     except Exception:
         pass
 
-# ---- json io ----
+
+# -------------------- JSON IO --------------------
 def load_json(path: Path, default=None):
     if not path.exists():
         return default
@@ -63,7 +78,8 @@ def save_json(path: Path, obj):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
 
-# ---- lock ----
+
+# -------------------- Lock (extra safety) --------------------
 def acquire_lock(max_age_seconds: int = 20*60) -> bool:
     now = int(time.time())
     cur = load_json(LOCK_FILE, {})
@@ -80,7 +96,8 @@ def release_lock():
     except Exception:
         pass
 
-# ---- identity ----
+
+# -------------------- Identity --------------------
 def get_device_identity_from_env():
     device_id = os.getenv("DEVICE_ID_16", "").strip()
     device_name = os.getenv("DEVICE_NAME", "").strip()
@@ -92,7 +109,8 @@ def get_device_identity_from_env():
 
     return device_id, device_name
 
-# ---- cookies (persisten) ----
+
+# -------------------- Cookie persistence --------------------
 def load_cookie_value() -> str | None:
     data = load_json(COOKIE_FILE, {})
     c = (data.get("cookie") or "").strip()
@@ -102,23 +120,20 @@ def save_cookie_value(cookie_value: str | None):
     save_json(COOKIE_FILE, {"cookie": cookie_value or ""})
 
 def set_session_cookie(session: requests.Session, cookie_value: str | None):
-    # cookie_value contoh: "ekinbarut=...."
-    if not cookie_value:
-        return
-    if "=" not in cookie_value:
+    # cookie_value: "ekinbarut=...."
+    if not cookie_value or "=" not in cookie_value:
         return
     name, val = cookie_value.split("=", 1)
-    # domain path dibuat longgar
     session.cookies.set(name, val)
 
 def extract_ekin_cookie_from_session(session: requests.Session) -> str | None:
-    # ambil cookie bernama ekinbarut dari cookie jar
     for c in session.cookies:
         if c.name == "ekinbarut":
             return f"{c.name}={c.value}"
     return None
 
-# ---- session + retry ----
+
+# -------------------- Session + retry --------------------
 def make_session() -> requests.Session:
     s = requests.Session()
     retry = Retry(
@@ -134,7 +149,7 @@ def make_session() -> requests.Session:
     return s
 
 def base_headers():
-    # mirip OkHttp sederhana
+    # header sederhana mendekati OkHttp
     return {
         "Accept": ACCEPT_HEADER,
         "User-Agent": USER_AGENT,
@@ -145,7 +160,8 @@ def base_headers():
 def post_form(session: requests.Session, url: str, data: dict):
     return session.post(url, data=data, headers=base_headers(), timeout=30)
 
-# ---- ket rules ----
+
+# -------------------- Rules --------------------
 def normalize_ket(ket: str) -> str:
     t = (ket or "").strip()
     if not t:
@@ -164,7 +180,11 @@ def is_marked(value: str) -> bool:
     v = (value or "").strip()
     return bool(v) and v != "-"
 
-# ---- state per hari (anti double + anti spam ntfy) ----
+def is_sndloc_success(ok: bool, msg: str) -> bool:
+    return bool(ok) and (msg or "").strip().lower().startswith("berhasil:")
+
+
+# -------------------- State per day --------------------
 def state_path_for(day: date, key: str) -> Path:
     return STATE_DIR / f"{day.isoformat()}_{key}.json"
 
@@ -188,6 +208,14 @@ def mark_done(day: date, key: str, ok: bool, msg: str, infoday_obj: dict | None)
     st["last_infoday"] = infoday_obj
     save_state(day, key, st)
 
+def mark_last_only(day: date, key: str, ok: bool, msg: str, infoday_obj: dict | None):
+    st = load_state(day, key)
+    st["last_run_at"] = tz_now_wib().isoformat(sep=" ", timespec="seconds")
+    st["last_result_ok"] = bool(ok)
+    st["last_message"] = msg
+    st["last_infoday"] = infoday_obj
+    save_state(day, key, st)
+
 def notified_already(day: date, key: str) -> bool:
     st = load_state(day, key)
     return bool(st.get("notified", False))
@@ -198,7 +226,8 @@ def mark_notified(day: date, key: str):
     st["notified_at"] = tz_now_wib().isoformat(sep=" ", timespec="seconds")
     save_state(day, key, st)
 
-# ---- koordinat ----
+
+# -------------------- Coordinates --------------------
 def load_coords_from_csv(path: str = "koordinat.csv"):
     p = Path(path)
     if not p.exists():
@@ -237,10 +266,10 @@ def get_or_pick_coord():
     save_json(COORD_FILE, {"lat": lat, "lng": lng})
     return lat, lng
 
-# ---- API wrappers ----
+
+# -------------------- API wrappers --------------------
 def auth_initial(session: requests.Session):
-    r = post_form(session, AUTH_URL, {"token": "null", "akun": "null"})
-    return r
+    return post_form(session, AUTH_URL, {"token": "null", "akun": "null"})
 
 def login(session: requests.Session, user: str, pw: str, imei: str, dname: str):
     r = post_form(session, LOGIN_URL, {"user": user, "pass": pw, "imei": imei, "dname": dname})
@@ -310,7 +339,8 @@ def sndloc(session: requests.Session, token: str, akun: str, lat: float, lng: fl
         pass
     return ok_send, msg_send
 
-# ---- core ----
+
+# -------------------- core --------------------
 def run_once(type_name: str):
     user = os.getenv("EKIN_USER", "").strip()
     pw   = os.getenv("EKIN_PASS", "").strip()
@@ -322,12 +352,11 @@ def run_once(type_name: str):
 
     session = make_session()
 
-    # restore cookie ke session (fallback)
+    # restore cookie (fallback)
     set_session_cookie(session, load_cookie_value())
 
     # initial auth
     auth_initial(session)
-    # update cookie cache dari session
     save_cookie_value(extract_ekin_cookie_from_session(session))
 
     # login
@@ -342,7 +371,7 @@ def run_once(type_name: str):
     if not ok2:
         return False, msg2, None
 
-    # infoday sebelum
+    # infoday before
     ok3, info_before_obj = infoday_raw(session, token, akun)
     save_cookie_value(extract_ekin_cookie_from_session(session))
     if not ok3:
@@ -355,7 +384,7 @@ def run_once(type_name: str):
     if skip_ket:
         return True, reason, before["raw"]
 
-    # sudah masuk/pulang?
+    # already marked?
     if type_name == "MASUK" and is_marked(before["masuk"]):
         return True, f"SKIP: sudah MASUK ({before['masuk']})", before["raw"]
     if type_name == "PULANG" and is_marked(before["pulang"]):
@@ -365,13 +394,14 @@ def run_once(type_name: str):
     ok_send, msg_send = sndloc(session, token, akun, lat, lng, type_name)
     save_cookie_value(extract_ekin_cookie_from_session(session))
 
-    # infoday setelah sndloc
+    # infoday after
     ok4, info_after_obj = infoday_raw(session, token, akun)
     save_cookie_value(extract_ekin_cookie_from_session(session))
     if not ok4:
         return ok_send, f"{msg_send} | INFODAY_AFTER error: {info_after_obj}", info_after_obj
 
     return ok_send, msg_send, info_after_obj
+
 
 def main():
     now = tz_now_wib()
@@ -383,8 +413,8 @@ def main():
     pulang_start = os.environ["WIN_PULANG_START"].strip()
     pulang_end   = os.environ["WIN_PULANG_END"].strip()
 
-    masuk_target = int(os.getenv("MASUK_TARGET_COUNT", "1"))
-    pulang_target= int(os.getenv("PULANG_TARGET_COUNT", "1"))
+    masuk_target  = int(os.getenv("MASUK_TARGET_COUNT", "1"))
+    pulang_target = int(os.getenv("PULANG_TARGET_COUNT", "1"))
 
     tasks = []
     if in_window(now, masuk_start, masuk_end) and not already_done(today, "MASUK", masuk_target):
@@ -401,35 +431,28 @@ def main():
         return
 
     try:
-        # jitter kecil
+        # jitter kecil agar tidak nabrak persis bersamaan
         time.sleep(random.randint(2, 10))
 
         for tname in tasks:
             ok, msg, infoday_obj = run_once(tname)
+            snd_ok = is_sndloc_success(ok, msg)
 
-            # DONE hanya jika sndloc benar-benar sukses ("Berhasil:")
-        if ok and (msg or "").strip().lower().startswith("berhasil:"):
-            mark_done(today, tname, ok, msg, infoday_obj)
-        else:
-            # simpan info terakhir tanpa menaikkan done_count (opsional)
-            st = load_state(today, tname)
-            st["last_run_at"] = tz_now_wib().isoformat(sep=" ", timespec="seconds")
-            st["last_result_ok"] = bool(ok)
-            st["last_message"] = msg
-            st["last_infoday"] = infoday_obj
-            save_state(today, tname, st)
+            # DONE hanya jika sndloc sukses
+            if snd_ok:
+                mark_done(today, tname, ok, msg, infoday_obj)
+            else:
+                mark_last_only(today, tname, ok, msg, infoday_obj)
 
-
-
-            # NTFY: hanya dalam window (tasks ada) + hanya sekali per window/hari
+            # NTFY: hanya sekali per MASUK/PULANG per hari (karena cron berulang)
             if not notified_already(today, tname):
                 try:
                     payload = json.dumps(infoday_obj, ensure_ascii=False)
                 except Exception:
                     payload = str(infoday_obj)
 
-                title = f"DKPP_AUTO {tname} {'OK' if ok else 'INFO'}"
-                prio = "default" if ok else "high"
+                title = f"DKPP_AUTO {tname} {'OK' if snd_ok else 'INFO'}"
+                prio = "default" if snd_ok else "high"
                 ntfy(
                     title,
                     f"{tname}: {msg}\nWaktu: {tz_now_wib().isoformat(sep=' ', timespec='seconds')}\n\nINFODAY:\n{payload}",
@@ -437,10 +460,11 @@ def main():
                 )
                 mark_notified(today, tname)
 
-            print(f"{tname}: {ok} - {msg}")
+            print(f"{tname}: ok={ok} snd_ok={snd_ok} - {msg}")
 
     finally:
         release_lock()
+
 
 if __name__ == "__main__":
     main()
