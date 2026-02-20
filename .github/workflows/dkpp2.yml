@@ -11,7 +11,7 @@ on:
     - cron: "3-53/10 8 * * *"     # 08:03..08:53
     - cron: "3-53/10 9 * * *"     # 09:03..09:53
     - cron: "3-53/10 10 * * *"    # 10:03..10:53
-    - cron: "3 11 * * *"          # 11:03 (18:03 WIB) — runner akan cek window
+    - cron: "3 11 * * *"          # 11:03 (18:03 WIB)
   workflow_dispatch:
 
 concurrency:
@@ -52,9 +52,14 @@ jobs:
           path: |
             .cache
             .state
-          key: dkpp-auto-${{ env.RUN_KEY }}-${{ github.ref_name }}
+          key: dkpp-auto-v3-${{ env.RUN_KEY }}-${{ github.ref_name }}
           restore-keys: |
-            dkpp-auto-${{ env.RUN_KEY }}-${{ github.ref_name }}-
+            dkpp-auto-v3-${{ env.RUN_KEY }}-${{ github.ref_name }}-
+
+      - name: Reset state (manual only)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          rm -rf ".state/${RUN_KEY}" ".cache/${RUN_KEY}" || true
 
       - name: Install dependencies
         run: |
