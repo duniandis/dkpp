@@ -3,15 +3,15 @@ name: DKPP2 Auto Runner
 on:
   schedule:
     # MASUK (WIB 06:15-08:15) == UTC 23:15-01:15 (offset +3 menit)
-    - cron: "18-58/10 23 * * *"   # 23:18,23:28,23:38,23:48,23:58
-    - cron: "3-53/10 0 * * *"     # 00:03..00:53
-    - cron: "3-13/10 1 * * *"     # 01:03,01:13
+    - cron: "18-58/10 23 * * *"
+    - cron: "3-53/10 0 * * *"
+    - cron: "3-13/10 1 * * *"
 
     # PULANG (WIB 15:00-18:00) == UTC 08:00-11:00 (offset +3 menit)
-    - cron: "3-53/10 8 * * *"     # 08:03..08:53
-    - cron: "3-53/10 9 * * *"     # 09:03..09:53
-    - cron: "3-53/10 10 * * *"    # 10:03..10:53
-    - cron: "3 11 * * *"          # 11:03 (18:03 WIB)
+    - cron: "3-53/10 8 * * *"
+    - cron: "3-53/10 9 * * *"
+    - cron: "3-53/10 10 * * *"
+    - cron: "3 11 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -52,7 +52,7 @@ jobs:
           path: |
             .cache
             .state
-          key: dkpp-auto-v3-${{ env.RUN_KEY }}-${{ github.ref_name }}
+          key: dkpp-auto-v3-${{ env.RUN_KEY }}-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
             dkpp-auto-v3-${{ env.RUN_KEY }}-${{ github.ref_name }}-
 
