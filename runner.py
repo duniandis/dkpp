@@ -513,6 +513,15 @@ def probe_infoday():
 def main():
     now = tz_now_wib()
     today = now.date()
+    
+    # Kalau hari ini sudah pernah notif LIBUR / DINAS_KET, stop total (jangan login lagi)
+    if was_notified(today, "LIBUR"):
+        print(f"[{now}] LIBUR sudah terdeteksi hari ini ({RUN_KEY}). Skip login/probe.")
+        return
+    
+    if was_notified(today, "DINAS_KET"):
+        print(f"[{now}] DINAS_KET sudah terdeteksi hari ini ({RUN_KEY}). Skip login/probe.")
+        return
 
     masuk_target  = int(os.getenv("MASUK_TARGET_COUNT", "1"))
     pulang_target = int(os.getenv("PULANG_TARGET_COUNT", "1"))
