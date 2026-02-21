@@ -52,7 +52,7 @@ jobs:
           path: |
             .cache
             .state
-          key: dkpp-auto-v3-${{ env.RUN_KEY }}-${{ github.ref_name }}
+          key: dkpp-auto-v3-${{ env.RUN_KEY }}-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
             dkpp-auto-v3-${{ env.RUN_KEY }}-${{ github.ref_name }}-
 
