@@ -513,58 +513,65 @@ def probe_infoday():
 def main():
     now = tz_now_wib()
     today = now.date()
-    
-    # Kalau hari ini sudah pernah notif LIBUR / DINAS_KET, stop total (jangan login lagi)
-    if was_notified(today, "LIBUR"):
-        print(f"[{now}] LIBUR sudah terdeteksi hari ini ({RUN_KEY}). Skip login/probe.")
-        return
-    
-    if was_notified(today, "DINAS_KET"):
-        print(f"[{now}] DINAS_KET sudah terdeteksi hari ini ({RUN_KEY}). Skip login/probe.")
-        return
 
     masuk_target  = int(os.getenv("MASUK_TARGET_COUNT", "1"))
     pulang_target = int(os.getenv("PULANG_TARGET_COUNT", "1"))
 
+    # 0) Stop total kalau MASUK & PULANG sudah DONE hari ini (per akun karena STATE_DIR pakai RUN_KEY)
+    if already_done(today, "MASUK", masuk_target) and already_done(today, "PULANG", pulang_target):
+        print(f"[{now}] MASUK & PULANG sudah DONE hari ini ({RUN_KEY}). Skip login/probe.")
+        return
+
+    # 1) Kalau hari ini sudah terdeteksi LIBUR / DINAS_KET, stop total (jangan login terus-terusan)
+    if was_notified(today, "LIBUR"):
+        print(f"[{now}] LIBUR sudah terdeteksi hari ini ({RUN_KEY}). Skip login/probe.")
+        return
+
+    if was_notified(today, "DINAS_KET"):
+        print(f"[{now}] DINAS_KET sudah terdeteksi hari ini ({RUN_KEY}). Skip login/probe.")
+        return
+
+    # 2) Lock per akun (karena LOCK_FILE sudah di .state/<RUN_KEY>/lock.json)
     if not acquire_lock():
-        print(f"[{now}] Lock aktif. Exit.")
+        print(f"[{now}] Lock aktif ({RUN_KEY}). Exit.")
         return
 
     try:
-        # jitter kecil biar tidak “nabrak” persis
+        # jitter kecil biar tidak nabrak persis antar workflow
         time.sleep(random.randint(2, 10))
 
-        # ===== Probe infoday untuk window dinamis / libur / ket =====
+        # 3) Probe infoday untuk baca kondisi hari ini (tanpa sndloc)
         okp, msgp, info_obj, device_id, device_name = probe_infoday()
         if not okp or not isinstance(info_obj, dict):
-            print(f"[{now}] PROBE gagal: {msgp}")
+            print(f"[{now}] PROBE gagal ({RUN_KEY}): {msgp}")
             return
 
         info = extract_infodata(info_obj)
 
-        # 1) KET dinas => notif 1x/hari, exit (tidak sndloc)
-        skip, ket = ket_is_dinas_skip(info)
-        if skip:
+        # 4) KET dinas (>2 karakter) => notif 1x/hari, lalu stop (tidak sndloc)
+        skip_dinas, ket = ket_is_dinas_skip(info)
+        if skip_dinas:
             notify_dinas_once(today, now, device_name, device_id, ket, info)
-            print(f"[{now}] DINAS via KET. Exit.")
+            print(f"[{now}] DINAS via KET ({RUN_KEY}). Exit.")
             return
 
-        # 2) Libur / tidak terjadwal => notif 1x/hari, exit
+        # 5) Hari libur / tidak terjadwal => notif 1x/hari, lalu stop
         if looks_like_libur(info):
             notify_libur_once(today, now, device_name, device_id, info, label="LIBUR")
-            print(f"[{now}] Hari libur / tidak terjadwal. Exit.")
+            print(f"[{now}] Hari libur / tidak terjadwal ({RUN_KEY}). Exit.")
             return
 
-        # 3) Window dinamis dari infoday
+        # 6) Ambil window dinamis dari infoday
         win = parse_window_from_infoday(info)
         if not win:
+            # dianggap invalid/non-jadwal -> notif 1x/hari
             notify_libur_once(today, now, device_name, device_id, info, label="LIBUR/INVALID")
-            print(f"[{now}] Window tidak valid (jadwal tidak terbaca). Exit.")
+            print(f"[{now}] Window tidak valid ({RUN_KEY}). Exit.")
             return
 
         masuk_start, masuk_end, pulang_start, pulang_end = win
 
-        # ===== Tentukan task berdasar INFODAY window dinamis =====
+        # 7) Tentukan task berdasar window dinamis + state DONE
         tasks = []
         if in_window(now, masuk_start, masuk_end) and not already_done(today, "MASUK", masuk_target):
             tasks.append("MASUK")
@@ -572,14 +579,14 @@ def main():
             tasks.append("PULANG")
 
         if not tasks:
-            print(f"[{now}] Di luar window dinamis / sudah DONE. Exit.")
+            print(f"[{now}] Di luar window dinamis / sudah DONE ({RUN_KEY}). Exit.")
             return
 
-        # ===== Eksekusi task =====
+        # 8) Eksekusi task
         for tname in tasks:
             ok_send, msg_send, infoday_obj, device_id2, device_name2 = run_once(tname)
 
-            # simpan last info state (biar kelihatan)
+            # simpan last state (monitoring)
             st = load_state(today, tname)
             st["last_run_at"] = tz_now_wib().isoformat(sep=" ", timespec="seconds")
             st["last_message"] = msg_send
@@ -587,15 +594,14 @@ def main():
             st["last_infoday_raw"] = infoday_obj
             save_state(today, tname, st)
 
-            # Kalau run_once stop karena KET dinas => sudah notif dinas dan return
-            # Kita lanjut ke task lain saja.
+            # Jika run_once berhenti karena KET dinas, run_once sudah kirim notif 1x/hari
             if (msg_send or "").startswith("SKIP DINAS:"):
-                print(f"{tname}: {msg_send}")
+                print(f"{tname} ({RUN_KEY}): {msg_send}")
                 continue
 
-            # NTFY hari kerja: hanya jika real success (Berhasil + DINAS + bukan terkendala)
+            # NTFY hari kerja: hanya real success
+            # (Berhasil:, mengandung DINAS, tidak mengandung kendala/admin)
             if is_real_success(ok_send, msg_send):
-                # notif hanya 1x/hari per MASUK/PULANG per akun
                 if not was_notified(today, tname):
                     info_after = extract_infodata(infoday_obj if isinstance(infoday_obj, dict) else {})
                     title = f"DKPP_AUTO {RUN_KEY} {tname} OK"
@@ -613,12 +619,12 @@ def main():
 
                 # DONE hanya jika real success
                 mark_done(today, tname, True, msg_send, infoday_obj)
-                print(f"{tname}: DONE - {msg_send}")
+                print(f"{tname} ({RUN_KEY}): DONE - {msg_send}")
             else:
-                # selain real success:
-                # - jika "terkendala" => tidak notif, tidak done (biar retry)
-                # - jika "SKIP: sudah MASUK/PULANG" => tidak notif, tidak done (aman)
-                print(f"{tname}: NO-DONE - {msg_send}")
+                # contoh:
+                # - Terkendala => tidak notif, tidak done (biar retry)
+                # - SKIP: sudah MASUK/PULANG => tidak notif, tidak done
+                print(f"{tname} ({RUN_KEY}): NO-DONE - {msg_send}")
 
     finally:
         release_lock()
