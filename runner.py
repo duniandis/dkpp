@@ -522,7 +522,19 @@ def main():
         print(f"[{now}] MASUK & PULANG sudah DONE hari ini ({RUN_KEY}). Skip login/probe.")
         return
 
-    # 1) Kalau hari ini sudah terdeteksi LIBUR / DINAS_KET, stop total (jangan login terus-terusan)
+    # 1) Stop login di blok PAGI kalau MASUK sudah DONE (hemat server)
+    #    Sesuaikan blok ini dengan cron PAGI kamu (mis. 05:30-08:15, saya buat sedikit buffer)
+    if already_done(today, "MASUK", masuk_target) and in_window(now, "05:20:00", "08:40:00"):
+        print(f"[{now}] MASUK sudah DONE ({RUN_KEY}). Skip login/probe (pagi).")
+        return
+
+    # 2) Stop login di blok SORE kalau PULANG sudah DONE (hemat server)
+    #    Sesuaikan blok ini dengan cron SORE kamu (mis. 14:30-17:30, saya buat sedikit buffer)
+    if already_done(today, "PULANG", pulang_target) and in_window(now, "14:20:00", "18:10:00"):
+        print(f"[{now}] PULANG sudah DONE ({RUN_KEY}). Skip login/probe (sore).")
+        return
+
+    # 3) Kalau hari ini sudah terdeteksi LIBUR / DINAS_KET, stop total (jangan login terus-terusan)
     if was_notified(today, "LIBUR"):
         print(f"[{now}] LIBUR sudah terdeteksi hari ini ({RUN_KEY}). Skip login/probe.")
         return
@@ -531,7 +543,7 @@ def main():
         print(f"[{now}] DINAS_KET sudah terdeteksi hari ini ({RUN_KEY}). Skip login/probe.")
         return
 
-    # 2) Lock per akun (karena LOCK_FILE sudah di .state/<RUN_KEY>/lock.json)
+    # 4) Lock per akun (karena LOCK_FILE sudah di .state/<RUN_KEY>/lock.json)
     if not acquire_lock():
         print(f"[{now}] Lock aktif ({RUN_KEY}). Exit.")
         return
@@ -540,7 +552,7 @@ def main():
         # jitter kecil biar tidak nabrak persis antar workflow
         time.sleep(random.randint(2, 10))
 
-        # 3) Probe infoday untuk baca kondisi hari ini (tanpa sndloc)
+        # 5) Probe infoday untuk baca kondisi hari ini (tanpa sndloc)
         okp, msgp, info_obj, device_id, device_name = probe_infoday()
         if not okp or not isinstance(info_obj, dict):
             print(f"[{now}] PROBE gagal ({RUN_KEY}): {msgp}")
@@ -548,20 +560,20 @@ def main():
 
         info = extract_infodata(info_obj)
 
-        # 4) KET dinas (>2 karakter) => notif 1x/hari, lalu stop (tidak sndloc)
+        # 6) KET dinas (>2 karakter) => notif 1x/hari, lalu stop (tidak sndloc)
         skip_dinas, ket = ket_is_dinas_skip(info)
         if skip_dinas:
             notify_dinas_once(today, now, device_name, device_id, ket, info)
             print(f"[{now}] DINAS via KET ({RUN_KEY}). Exit.")
             return
 
-        # 5) Hari libur / tidak terjadwal => notif 1x/hari, lalu stop
+        # 7) Hari libur / tidak terjadwal => notif 1x/hari, lalu stop
         if looks_like_libur(info):
             notify_libur_once(today, now, device_name, device_id, info, label="LIBUR")
             print(f"[{now}] Hari libur / tidak terjadwal ({RUN_KEY}). Exit.")
             return
 
-        # 6) Ambil window dinamis dari infoday
+        # 8) Ambil window dinamis dari infoday
         win = parse_window_from_infoday(info)
         if not win:
             # dianggap invalid/non-jadwal -> notif 1x/hari
@@ -571,7 +583,7 @@ def main():
 
         masuk_start, masuk_end, pulang_start, pulang_end = win
 
-        # 7) Tentukan task berdasar window dinamis + state DONE
+        # 9) Tentukan task berdasar window dinamis + state DONE
         tasks = []
         if in_window(now, masuk_start, masuk_end) and not already_done(today, "MASUK", masuk_target):
             tasks.append("MASUK")
@@ -582,7 +594,7 @@ def main():
             print(f"[{now}] Di luar window dinamis / sudah DONE ({RUN_KEY}). Exit.")
             return
 
-        # 8) Eksekusi task
+        # 10) Eksekusi task
         for tname in tasks:
             ok_send, msg_send, infoday_obj, device_id2, device_name2 = run_once(tname)
 
@@ -628,6 +640,7 @@ def main():
 
     finally:
         release_lock()
+
 
 if __name__ == "__main__":
     main()
