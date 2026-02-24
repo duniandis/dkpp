@@ -517,6 +517,10 @@ def main():
     masuk_target  = int(os.getenv("MASUK_TARGET_COUNT", "1"))
     pulang_target = int(os.getenv("PULANG_TARGET_COUNT", "1"))
 
+    if not (in_window(now, "06:15:00", "08:15:00") or in_window(now, "15:00:00", "18:00:00")):
+    print(f"[{now}] Di luar blok aktif ({RUN_KEY}). Skip login/probe.")
+    return
+
     # 0) Stop total kalau MASUK & PULANG sudah DONE hari ini (per akun karena STATE_DIR pakai RUN_KEY)
     if already_done(today, "MASUK", masuk_target) and already_done(today, "PULANG", pulang_target):
         print(f"[{now}] MASUK & PULANG sudah DONE hari ini ({RUN_KEY}). Skip login/probe.")
