@@ -2,7 +2,7 @@ name: DKPP1 Auto Runner
 
 on:
   schedule:
-    - cron: "1-59/15 * * * *"
+    - cron: "1-59/10 * * * *"
   workflow_dispatch:
 
 concurrency:
