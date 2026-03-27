@@ -18,9 +18,9 @@ jobs:
       RUN_KEY: "dkpp3"
 
       WIN_MASUK_START: "06:15:00"
-      WIN_MASUK_END: "08:15:00"
-      WIN_PULANG_START: "15:00:00"
-      WIN_PULANG_END: "18:00:00"
+      WIN_MASUK_END: "07:15:00"
+      WIN_PULANG_START: "15:30:00"
+      WIN_PULANG_END: "17:00:00"
 
       MASUK_TARGET_COUNT: "1"
       PULANG_TARGET_COUNT: "1"
