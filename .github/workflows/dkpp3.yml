@@ -1,9 +1,9 @@
 name: DKPP3 Auto Runner
-
+#Nadya
 on:
   schedule:
-    - cron: "2-59/10 * * * *"
-  workflow_dispatch:
+#    - cron: "2-59/10 * * * *"
+#  workflow_dispatch:
 
 concurrency:
   group: dkpp-queue-dkpp3
