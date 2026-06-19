@@ -1,8 +1,9 @@
+#sari
 name: DKPP1 Auto Runner
 
-on:
-  schedule:
-    - cron: "1-59/10 * * * *"
+#on:
+#  schedule:
+#    - cron: "1-59/10 * * * *"
   workflow_dispatch:
 
 concurrency:
