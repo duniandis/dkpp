@@ -113,7 +113,7 @@ def set_session_cookie(session: requests.Session, cookie_value: str | None):
 
 def extract_ekin_cookie_from_session(session: requests.Session) -> str | None:
     for c in session.cookies:
-        if c.name == "ekinbarut":
+        if c.name == "ekin_barut":
             return f"{c.name}={c.value}"
     return None
 
